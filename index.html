@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>位置定时发送</title>
+<style>
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif; background:#eef3f7; color:#26333c; }
+  .wrap { max-width:640px; margin:0 auto; padding:16px 16px 40px; }
+  h1 { font-size:20px; margin:6px 0 2px; color:#1f3a5f; }
+  .sub { font-size:12px; color:#7d8b96; margin-bottom:14px; }
+  .card { background:#fff; border-radius:14px; padding:16px; margin-bottom:14px; box-shadow:0 1px 4px rgba(0,0,0,.06); }
+  .card h2 { font-size:15px; margin:0 0 12px; color:#1f3a5f; border-left:4px solid #2f7fd0; padding-left:8px; }
+  .input { width:100%; padding:11px 12px; border:1px solid #d5dee6; border-radius:10px; font-size:14px; outline:none; margin-bottom:8px; }
+  .btn { border:none; border-radius:10px; padding:11px 16px; font-size:14px; cursor:pointer; background:#1f3a5f; color:#fff; }
+  .btn.blue { background:#2f7fd0; }
+  .btn.red { background:#c0392b; }
+  .btn.block { width:100%; }
+  .locBtn { width:100%; padding:14px; font-size:16px; border:none; border-radius:12px; cursor:pointer; background:#2f7fd0; color:#fff; font-weight:700; }
+  .locBtn:disabled { opacity:.6; }
+  .locinfo { margin-top:12px; font-size:14px; line-height:1.9; }
+  .locinfo a { color:#2f7fd0; word-break:break-all; }
+  .seg { display:flex; gap:8px; margin-top:10px; }
+  .seg label { flex:1; text-align:center; padding:8px; border:1px solid #d5dee6; border-radius:10px; cursor:pointer; font-size:13px; }
+  .seg input { display:none; }
+  .seg input:checked + label { background:#2f7fd0; color:#fff; border-color:#2f7fd0; }
+  .row { display:flex; gap:8px; margin-bottom:8px; }
+  .row input, .row select { flex:1; padding:10px 12px; border:1px solid #d5dee6; border-radius:10px; font-size:14px; outline:none; }
+  .tag { display:inline-block; margin:3px 6px 3px 0; background:#eef3f7; border-radius:14px; padding:4px 10px; font-size:13px; }
+  .tag a { color:#c0392b; text-decoration:none; margin-left:6px; cursor:pointer; }
+  .switch { display:flex; align-items:center; gap:10px; margin-top:8px; }
+  .rec { border-bottom:1px solid #f0f4f7; padding:8px 0; font-size:13px; }
+  .rec .t { color:#7d8b96; font-size:12px; }
+  .ok { color:#2e9e5b; } .fail { color:#c0392b; }
+  .rec .body { white-space:pre-line; background:#f6f9fb; border-radius:8px; padding:8px; margin-top:6px; font-size:12px; color:#4a5a66; }
+  .empty { color:#9aa7b0; font-size:13px; text-align:center; padding:16px 0; }
+  .btnrow { display:flex; gap:8px; margin-top:12px; }
+  .btnrow button { flex:1; border:none; border-radius:10px; padding:12px; font-size:15px; cursor:pointer; font-weight:700; }
+  .auth { max-width:360px; margin:40px auto; }
+  .auth h1 { text-align:center; }
+  .auth .hint { text-align:center; color:#7d8b96; font-size:12px; margin-bottom:16px; }
+  .topbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+  .topbar .who { font-size:14px; color:#1f3a5f; }
+</style>
+</head>
+<body>
+<div class="wrap" id="authView">
+  <div class="auth">
+    <h1>📍 位置定时发送</h1>
+    <div class="hint">登录或注册后开始使用</div>
+    <div class="card">
+      <input class="input" id="username" placeholder="用户名（3-20 位字母数字）">
+      <input class="input" id="password" type="password" placeholder="密码（至少 6 位）">
+      <div class="btnrow">
+        <button class="btn blue" id="loginBtn">登录</button>
+        <button class="btn" id="regBtn">注册</button>
+      </div>
+      <div id="authMsg" style="margin-top:8px;color:#c0392b;font-size:13px;"></div>
+    </div>
+  </div>
+</div>
+
+<div class="wrap" id="appView" style="display:none;">
+  <div class="topbar">
+    <h1>📍 位置定时发送</h1>
+    <span class="who">👤 <b id="whoName"></b> <a id="logout" style="color:#c0392b;cursor:pointer;">退出</a></span>
+  </div>
+
+  <div class="card">
+    <h2>当前位置</h2>
+    <button class="locBtn" id="locBtn">📍 获取我的位置</button>
+    <div class="locinfo" id="locinfo"></div>
+    <div class="seg">
+      <input type="radio" name="prec" id="pCity" value="city"><label for="pCity">城市级</label>
+      <input type="radio" name="prec" id="pExact" value="exact"><label for="pExact">精确位置</label>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>接收人（邮箱）</h2>
+    <div class="row"><input id="email" placeholder="输入接收邮箱"><button class="btn" id="addEmail">添加</button></div>
+    <div id="recipients"></div>
+  </div>
+
+  <div class="card">
+    <h2>定时规则</h2>
+    <div class="row">
+      <select id="interval">
+        <option value="15">每 15 分钟</option>
+        <option value="30" selected>每 30 分钟</option>
+        <option value="60">每 60 分钟</option>
+        <option value="120">每 120 分钟</option>
+      </select>
+      <button class="btn" id="saveRule">保存</button>
+    </div>
+    <div class="switch"><input type="checkbox" id="autoOn"><span>开启自动发送</span><span id="nextSend" style="color:#7d8b96;font-size:12px;"></span></div>
+    <div class="btnrow">
+      <button class="btn blue" id="sendNow">立即发送</button>
+      <button class="btn red" id="stopAll">停止全部</button>
+    </div>
+    <div id="smtpNote" style="margin-top:8px;font-size:12px;color:#c0392b;"></div>
+  </div>
+
+  <div class="card">
+    <h2>发送记录</h2>
+    <button id="clearRec" style="float:right;border:none;background:none;color:#c0392b;cursor:pointer;font-size:12px;">清空</button>
+    <div id="records"><div class="empty">暂无记录</div></div>
+  </div>
+</div>
+
+<script>
+var state = { username:'', recipients:[], rule:{interval:30,enabled:false,precision:'city'}, location:null, records:[], nextSendAt:null, smtp:false };
+var TOKEN = localStorage.getItem('loc_token') || '';
+
+function esc(s){ return String(s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function mapLink(loc){ return 'https://uri.amap.com/marker?position=' + loc.lng + ',' + loc.lat; }
+function api(path, body){
+  var opts = { method: body ? 'POST' : 'GET', headers: {'Content-Type':'application/json'} };
+  if (TOKEN) opts.headers['Authorization'] = 'Bearer ' + TOKEN;
+  if (body) opts.body = JSON.stringify(body);
+  return fetch(path, opts).then(function(r){ return r.json(); });
+}
+function showApp(show){ document.getElementById('authView').style.display = show ? 'none' : 'block'; document.getElementById('appView').style.display = show ? 'block' : 'none'; }
+
+// 登录/注册
+document.getElementById('loginBtn').addEventListener('click', function(){
+  var u = document.getElementById('username').value.trim(), p = document.getElementById('password').value;
+  if (!u || !p) { document.getElementById('authMsg').textContent = '请填写用户名和密码'; return; }
+  api('/api/login', {username:u, password:p}).then(function(d){ if (d.token){ TOKEN = d.token; localStorage.setItem('loc_token', TOKEN); state.username = d.username; showApp(true); document.getElementById('whoName').textContent = d.username; refresh(); } else { document.getElementById('authMsg').textContent = d.error || '登录失败'; } });
+});
+document.getElementById('regBtn').addEventListener('click', function(){
+  var u = document.getElementById('username').value.trim(), p = document.getElementById('password').value;
+  if (!u || !p) { document.getElementById('authMsg').textContent = '请填写用户名和密码'; return; }
+  api('/api/register', {username:u, password:p}).then(function(d){ if (d.token){ TOKEN = d.token; localStorage.setItem('loc_token', TOKEN); state.username = d.username; showApp(true); document.getElementById('whoName').textContent = d.username; refresh(); } else { document.getElementById('authMsg').textContent = d.error || '注册失败'; } });
+});
+document.getElementById('logout').addEventListener('click', function(){
+  api('/api/logout'); TOKEN = ''; localStorage.removeItem('loc_token'); state = { username:'', recipients:[], rule:{interval:30,enabled:false,precision:'city'}, location:null, records:[], nextSendAt:null, smtp:false }; showApp(false); document.getElementById('authMsg').textContent = '';
+});
+
+function render(){
+  document.getElementById('whoName').textContent = state.username;
+  document.getElementById('smtpNote').textContent = state.smtp ? '' : '⚠ 邮件服务未配置（SMTP），发送会失败';
+  var li = document.getElementById('locinfo');
+  if (state.location){ var addr = state.rule.precision === 'city' ? (state.location.city || state.location.address) : (state.location.full || state.location.address); li.innerHTML = '<b>当前位置：</b>'+esc(addr)+'<br><b>地图：</b><a href="'+mapLink(state.location)+'" target="_blank">'+mapLink(state.location)+'</a><br><span style="color:#7d8b96;font-size:12px;">坐标 '+state.location.lat.toFixed(5)+', '+state.location.lng.toFixed(5)+' · 精度约 '+Math.round(state.location.acc)+' 米</span>'; }
+  else { li.innerHTML = '<span style="color:#9aa7b0;">尚未定位</span>'; }
+  document.getElementById('pCity').checked = state.rule.precision !== 'exact';
+  document.getElementById('pExact').checked = state.rule.precision === 'exact';
+  var rr = document.getElementById('recipients');
+  rr.innerHTML = state.recipients.length ? state.recipients.map(function(e){ return '<span class="tag">'+esc(e)+'<a data-e="'+esc(e)+'">✕</a></span>'; }).join('') : '<span class="empty">未添加接收人</span>';
+  document.getElementById('interval').value = String(state.rule.interval);
+  document.getElementById('autoOn').checked = state.rule.enabled;
+  document.getElementById('nextSend').textContent = state.nextSendAt ? ('下次发送：'+new Date(state.nextSendAt).toLocaleTimeString('zh-CN',{hour12:false})) : '';
+  var rc = document.getElementById('records');
+  if (!state.records.length){ rc.innerHTML = '<div class="empty">暂无记录</div>'; }
+  else { rc.innerHTML = state.records.map(function(r){ var cls = r.result==='sent'?'ok':'fail'; var lbl = r.result==='sent'?'✓ 已发送':('✗ 失败（'+esc(r.reason||'')+'）'); return '<div class="rec"><span class="t">'+new Date(r.t).toLocaleString('zh-CN',{hour12:false})+' · '+esc(r.trigger)+'</span><br><span class="'+cls+'">'+lbl+'</span><br><span style="color:#4a5a66;">'+esc(r.address||'')+' → '+esc((r.recipients||[]).join(', '))+'</span>'+(r.body?'<div class="body">'+esc(r.body)+'</div>':'')+'</div>'; }).join(''); }
+}
+function refresh(){ api('/api/state').then(function(d){ if (d.error === '未登录'){ showApp(false); TOKEN=''; localStorage.removeItem('loc_token'); return; } state = d; render(); }).catch(function(){}); }
+
+document.getElementById('locBtn').addEventListener('click', function(){
+  var btn = this; if (!navigator.geolocation){ alert('浏览器不支持定位'); return; }
+  btn.textContent = '定位中…'; btn.disabled = true;
+  navigator.geolocation.getCurrentPosition(function(pos){
+    var lat = pos.coords.latitude, lng = pos.coords.longitude, acc = pos.coords.accuracy;
+    api('/api/location', { lat:lat, lng:lng, accuracy:acc }).then(function(d){ state=d; render(); btn.textContent='📍 重新定位'; btn.disabled=false; }).catch(function(){ btn.textContent='📍 获取我的位置'; btn.disabled=false; });
+  }, function(err){ alert('定位失败：'+(err&&err.message?err.message:'请检查权限')); btn.textContent='📍 获取我的位置'; btn.disabled=false; }, { enableHighAccuracy:true, timeout:15000, maximumAge:60000 });
+});
+document.getElementById('addEmail').addEventListener('click', function(){ var e = document.getElementById('email').value.trim(); if(!e) return; api('/api/recipients/add',{email:e}).then(function(d){ if(d.error){ alert(d.error); } else { state=d; render(); document.getElementById('email').value=''; } }); });
+document.getElementById('recipients').addEventListener('click', function(ev){ var a = ev.target.closest('a'); if(!a) return; api('/api/recipients/remove',{email:a.getAttribute('data-e')}).then(function(d){ state=d; render(); }); });
+['pCity','pExact'].forEach(function(id){ document.getElementById(id).addEventListener('change', function(){ api('/api/rule',{precision:this.value}).then(function(d){ state=d; render(); }); }); });
+document.getElementById('saveRule').addEventListener('click', function(){ var iv = parseInt(document.getElementById('interval').value,10); api('/api/rule',{interval:iv}).then(function(d){ state=d; render(); alert('已保存'); }); });
+document.getElementById('autoOn').addEventListener('change', function(){ api('/api/rule',{enabled:this.checked}).then(function(d){ state=d; render(); }); });
+document.getElementById('sendNow').addEventListener('click', function(){ api('/api/send-now').then(function(d){ state=d; render(); if(d.result&&d.result.ok){ alert('已发送'); } else { alert('发送失败：'+(d.result&&d.result.reason||'')); } }); });
+document.getElementById('stopAll').addEventListener('click', function(){ api('/api/rule',{enabled:false}).then(function(d){ state=d; render(); }); });
+document.getElementById('clearRec').addEventListener('click', function(){ api('/api/records/clear').then(function(d){ state=d; render(); }); });
+
+if (TOKEN) { refresh().then; api('/api/state').then(function(d){ if (d.username){ showApp(true); state=d; render(); } }); }
+</script>
+</body>
+</html>

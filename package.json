@@ -1,0 +1,8 @@
+{
+  "name": "location-app",
+  "version": "1.0.0",
+  "description": "位置定时发送 · 网页版（用户注册 + 设置 + 公用邮箱发邮件）",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "nodemailer": "^6.9.0" }
+}
