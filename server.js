@@ -16,14 +16,70 @@ const FROM = process.env.FROM || SMTP_USER || '位置服务';
 let mailer = null;
 if (SMTP_HOST && SMTP_USER && SMTP_PASS) { try { const nodemailer = require('nodemailer'); mailer = nodemailer.createTransport({ host: SMTP_HOST, port: SMTP_PORT, secure: SMTP_PORT === 465, auth: { user: SMTP_USER, pass: SMTP_PASS } }); } catch (e) {} }
 
+// MySQL（可选）：配置了 DB_* 环境变量就用 MySQL 永久保存，否则回退 data.json 文件
+const DB_HOST = process.env.DB_HOST || '';
+const DB_PORT = Number(process.env.DB_PORT || 3306);
+const DB_USER = process.env.DB_USER || '';
+const DB_PASS = process.env.DB_PASS || '';
+const DB_NAME = process.env.DB_NAME || '';
+let useDb = !!(DB_HOST && DB_USER && DB_NAME);
+let pool = null;
+function getPool() {
+  if (!pool) {
+    const mysql = require('mysql2/promise');
+    pool = mysql.createPool({ host: DB_HOST, port: DB_PORT, user: DB_USER, password: DB_PASS, database: DB_NAME, waitForConnections: true, connectionLimit: 5, charset: 'utf8mb4' });
+  }
+  return pool;
+}
+
 let db = { users: {}, sessions: {} };
-try { db = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); } catch (e) { db = { users: {}, sessions: {} }; }
-if (!db.users) db.users = {}; if (!db.sessions) db.sessions = {};
-function save() { try { fs.writeFileSync(DATA_FILE, JSON.stringify(db), 'utf8'); } catch (e) {} }
+function newRule() { return { interval: 30, precision: 'city', enabled: false }; }
+function newUser(name) { return { salt: '', hash: '', recipients: [], rule: newRule(), location: null, records: [], lastSendAt: 0 }; }
+
+function loadFile() {
+  try { db = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); } catch (e) { db = { users: {}, sessions: {} }; }
+  if (!db.users) db.users = {};
+  if (!db.sessions) db.sessions = {};
+  for (const n in db.users) {
+    const u = db.users[n];
+    if (!u.rule) u.rule = newRule();
+    if (!u.recipients) u.recipients = [];
+    if (!u.records) u.records = [];
+  }
+}
+
+async function loadDb() {
+  const p = getPool();
+  await p.query('CREATE TABLE IF NOT EXISTS users (username VARCHAR(20) PRIMARY KEY, salt VARCHAR(32) NOT NULL, hash VARCHAR(128) NOT NULL, data JSON NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+  const [rows] = await p.query('SELECT username, salt, hash, data FROM users');
+  db.users = {};
+  db.sessions = {};
+  for (const r of rows) {
+    let d = {};
+    try { d = (typeof r.data === 'string') ? JSON.parse(r.data) : (r.data || {}); } catch (e) {}
+    db.users[r.username] = { salt: r.salt, hash: r.hash, recipients: d.recipients || [], rule: Object.assign(newRule(), d.rule || {}), location: d.location || null, records: d.records || [], lastSendAt: d.lastSendAt || 0 };
+  }
+}
+
+let saveChain = Promise.resolve();
+function save() {
+  if (!useDb) { try { fs.writeFileSync(DATA_FILE, JSON.stringify(db), 'utf8'); } catch (e) {} return; }
+  const jobs = Object.keys(db.users).map(n => {
+    const u = db.users[n];
+    const data = JSON.stringify({ recipients: u.recipients || [], rule: u.rule, location: u.location || null, records: u.records || [], lastSendAt: u.lastSendAt || 0 });
+    return { name: n, salt: u.salt, hash: u.hash, data };
+  });
+  saveChain = saveChain.then(async () => {
+    const p = getPool();
+    for (const j of jobs) {
+      await p.query('INSERT INTO users (username, salt, hash, data) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE salt = VALUES(salt), hash = VALUES(hash), data = VALUES(data)', [j.name, j.salt, j.hash, j.data]);
+    }
+  }).catch(e => console.error('save err:', e && e.message));
+}
 
 function hashPw(pw, salt) { return crypto.scryptSync(pw, salt, 64).toString('hex'); }
-function newUser(name) { return { salt: '', hash: '', recipients: [], rule: { interval: 30, precision: 'city', enabled: false }, location: null, records: [], lastSendAt: 0 }; }
 
+const NL = String.fromCharCode(10);
 function fmt(t) { return new Date(t).toLocaleString('zh-CN', { hour12: false }); }
 function mapLink(loc) { return 'https://uri.amap.com/marker?position=' + loc.lng + ',' + loc.lat; }
 function json(res, code, obj) { try { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); } catch (e) {} }
@@ -52,7 +108,7 @@ async function doSend(u, trigger) {
   if (!user.recipients.length) { user.records.unshift({ t: Date.now(), trigger, result: 'fail', reason: '无接收人' }); save(); return { ok: false, reason: '无接收人' }; }
   const loc = user.location;
   const addr = user.rule.precision === 'city' ? (loc.city || loc.address) : (loc.full || loc.address);
-  const text = ['位置更新', '时间：' + fmt(Date.now()), '当前位置：' + addr, '坐标：' + loc.lat.toFixed(6) + ', ' + loc.lng.toFixed(6), '精度：约 ' + Math.round(loc.acc) + ' 米', '触发：' + trigger, '地图：' + mapLink(loc)].join('\n');
+  const text = ['位置更新', '时间：' + fmt(Date.now()), '当前位置：' + addr, '坐标：' + loc.lat.toFixed(6) + ', ' + loc.lng.toFixed(6), '精度：约 ' + Math.round(loc.acc) + ' 米', '触发：' + trigger, '地图：' + mapLink(loc)].join(NL);
   const subject = '位置更新 - ' + fmt(Date.now());
   const rec = { t: Date.now(), trigger, address: addr, recipients: user.recipients.slice(), result: 'sent', body: text, simulated: false, error: '' };
   if (!mailer) { rec.result = 'fail'; rec.simulated = true; rec.error = 'SMTP 未配置'; user.records.unshift(rec); save(); return { ok: false, reason: 'SMTP 未配置', text }; }
@@ -75,7 +131,7 @@ const srv = http.createServer(async (req, res) => {
   try {
     const u = new URL(req.url || '/', 'http://x');
     if (req.method === 'GET' && (u.pathname === '/' || u.pathname === '/index.html')) return file(res, 'index.html', 'text/html; charset=utf-8');
-    if (req.method === 'GET' && u.pathname === '/health') return json(res, 200, { ok: true, smtp: !!mailer, users: Object.keys(db.users).length });
+    if (req.method === 'GET' && u.pathname === '/health') return json(res, 200, { ok: true, smtp: !!mailer, storage: useDb ? 'mysql' : 'file', users: Object.keys(db.users).length });
 
     if (req.method === 'POST' && u.pathname === '/api/register') {
       const o = await readBody(req);
@@ -106,7 +162,6 @@ const srv = http.createServer(async (req, res) => {
       return json(res, 200, { ok: true });
     }
 
-    // 以下需登录
     const me = getUser(req);
     if (!me) return json(res, 401, { error: '未登录' });
     if (req.method === 'GET' && u.pathname === '/api/state') return json(res, 200, stateOf(me));
@@ -154,6 +209,15 @@ const srv = http.createServer(async (req, res) => {
     try { res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('server error'); } catch (_) {}
   }
 });
-srv.on('error', e => console.error('srv err:', e.message));
-process.on('uncaughtException', e => console.error('ue:', e.message));
-srv.listen(PORT, HOST, () => console.log('location-app on ' + HOST + ':' + PORT + (mailer ? ' (SMTP ready)' : ' (SMTP 未配置)') + ' users=' + Object.keys(db.users).length));
+
+(async function start() {
+  if (useDb) {
+    try { await loadDb(); console.log('MySQL loaded, users=' + Object.keys(db.users).length); }
+    catch (e) { console.error('MySQL load failed, fallback to file:', e && e.message); useDb = false; loadFile(); }
+  } else {
+    loadFile();
+  }
+  srv.on('error', e => console.error('srv err:', e.message));
+  process.on('uncaughtException', e => console.error('ue:', e.message));
+  srv.listen(PORT, HOST, () => console.log('location-app on ' + HOST + ':' + PORT + (useDb ? ' (MySQL)' : ' (file)') + (mailer ? ' (SMTP ready)' : ' (SMTP 未配置)') + ' users=' + Object.keys(db.users).length));
+})();
